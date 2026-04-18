@@ -1,0 +1,449 @@
+{
+  "configById": {
+    "CallService!30ib722": {
+      "requestPayload": "{\n  \"axes\": [\n    0\n  ]\n}",
+      "layout": "vertical",
+      "timeoutSeconds": 10,
+      "serviceName": "/rov_pid_controller/capture_setpoint"
+    },
+    "CallService!all_off": {
+      "serviceName": "/rov_pid_controller/set_all_modes",
+      "requestPayload": "{\n  \"modes\": [0, 0, 0, 0, 0, 0],\n  \"setpoints\": [0, 0, 0, 0, 0, 0],\n  \"capture_current\": [false, false, false, false, false, false]\n}",
+      "buttonText": "All OFF",
+      "buttonColor": "#808080",
+      "layout": "vertical",
+      "timeoutSeconds": 10
+    },
+    "CallService!all_hold": {
+      "serviceName": "/rov_pid_controller/set_all_modes",
+      "requestPayload": "{\n  \"modes\": [2, 2, 2, 2, 2, 2],\n  \"setpoints\": [0, 0, 0, 0, 0, 0],\n  \"capture_current\": [true, true, true, true, true, true]\n}",
+      "buttonText": "All HOLD (capture)",
+      "buttonColor": "#1976d2",
+      "layout": "vertical",
+      "timeoutSeconds": 10
+    },
+    "CallService!depth_yaw": {
+      "serviceName": "/rov_pid_controller/set_all_modes",
+      "requestPayload": "{\n  \"modes\": [0, 0, 2, 0, 0, 2],\n  \"setpoints\": [0, 0, 0, 0, 0, 0],\n  \"capture_current\": [false, false, true, false, false, true]\n}",
+      "buttonText": "Depth + Yaw hold",
+      "buttonColor": "#388e3c",
+      "layout": "vertical",
+      "timeoutSeconds": 10
+    },
+    "CallService!attitude": {
+      "serviceName": "/rov_pid_controller/set_all_modes",
+      "requestPayload": "{\n  \"modes\": [0, 0, 0, 2, 2, 2],\n  \"setpoints\": [0, 0, 0, 0, 0, 0],\n  \"capture_current\": [false, false, false, true, true, true]\n}",
+      "buttonText": "Attitude hold",
+      "buttonColor": "#f57c00",
+      "layout": "vertical",
+      "timeoutSeconds": 10
+    },
+    "CallService!all_inner": {
+      "serviceName": "/rov_pid_controller/set_all_modes",
+      "requestPayload": "{\n  \"modes\": [1, 1, 1, 1, 1, 1],\n  \"setpoints\": [0, 0, 0, 0, 0, 0],\n  \"capture_current\": [false, false, false, false, false, false]\n}",
+      "buttonText": "Velocity cmd (INNER)",
+      "buttonColor": "#7b1fa2",
+      "layout": "vertical",
+      "timeoutSeconds": 10
+    },
+    "3D!trajectory": {
+      "cameraState": {
+        "perspective": true,
+        "distance": 30.146795390577317,
+        "phi": 60.000000000000036,
+        "thetaOffset": 45.00000000000011,
+        "targetOffset": [
+          0,
+          0,
+          0
+        ],
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "followTf": "base_link",
+      "scene": {
+        "enableStats": false,
+        "backgroundColor": "#1a1a1a"
+      },
+      "transforms": {},
+      "topics": {
+        "/mimosa_node/graph/path": {
+          "visible": true,
+          "type": "foxglove.Path",
+          "lineWidth": 0.05,
+          "gradient": [
+            "#ff1744",
+            "#ffeb3b"
+          ]
+        },
+        "/mimosa_node/imu/manager/odometry": {
+          "visible": true,
+          "type": "foxglove.Odometry",
+          "showCovariance": false
+        }
+      },
+      "layers": {
+        "grid": {
+          "layerId": "foxglove.Grid",
+          "visible": true,
+          "color": "#444444",
+          "size": 20,
+          "divisions": 20
+        }
+      },
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "imageMode": {}
+    },
+    "Plot!pose": {
+      "title": "Pose vs Setpoint (6 DoF)",
+      "paths": [
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/rov_pid_controller/status.pose[0]",
+          "enabled": false,
+          "label": "x",
+          "color": "#e53935"
+        },
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/rov_pid_controller/status.setpoints[0]",
+          "enabled": true,
+          "label": "x_sp",
+          "color": "#e5393580"
+        },
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/rov_pid_controller/status.pose[1]",
+          "enabled": false,
+          "label": "y",
+          "color": "#fb8c00"
+        },
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/rov_pid_controller/status.setpoints[1]",
+          "enabled": true,
+          "label": "y_sp",
+          "color": "#fb8c0080"
+        },
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/rov_pid_controller/status.pose[2]",
+          "enabled": true,
+          "label": "z",
+          "color": "#1e88e5"
+        },
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/rov_pid_controller/status.setpoints[2]",
+          "enabled": true,
+          "label": "z_sp",
+          "color": "#1e88e580"
+        }
+      ],
+      "showLegend": true,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "showPlotValuesInLegend": false,
+      "legendDisplay": "floating",
+      "timeWindowMode": "sliding",
+      "followingViewWidth": 33.3022,
+      "showXAxisLabels": true,
+      "foxglovePanelTitle": "Linear states vs Setpoints"
+    },
+    "Plot!3ijy38v": {
+      "title": "Pose vs Setpoint (6 DoF)",
+      "paths": [
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/rov_pid_controller/status.pose[3]",
+          "enabled": false,
+          "label": "roll",
+          "color": "#8e24aa"
+        },
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/rov_pid_controller/status.setpoints[3]",
+          "enabled": true,
+          "label": "roll_sp",
+          "color": "#8e24aa80"
+        },
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/rov_pid_controller/status.pose[4]",
+          "enabled": false,
+          "label": "pitch",
+          "color": "#00897b"
+        },
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/rov_pid_controller/status.setpoints[4]",
+          "enabled": true,
+          "label": "pitch_sp",
+          "color": "#00897b80"
+        },
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/rov_pid_controller/status.pose[5]",
+          "enabled": true,
+          "label": "yaw",
+          "color": "#43a047"
+        },
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/rov_pid_controller/status.setpoints[5]",
+          "enabled": true,
+          "label": "yaw_sp",
+          "color": "#43a04780"
+        }
+      ],
+      "showLegend": true,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "showPlotValuesInLegend": false,
+      "legendDisplay": "floating",
+      "timeWindowMode": "sliding",
+      "followingViewWidth": 33.3022,
+      "showXAxisLabels": true,
+      "foxglovePanelTitle": "Angular states vs Setpoints"
+    },
+    "Plot!error": {
+      "title": "Tracking Error (6 DoF)",
+      "paths": [
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/rov_pid_controller/status.pose_error[0]",
+          "enabled": true,
+          "label": "x_err",
+          "color": "#e53935"
+        },
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/rov_pid_controller/status.pose_error[1]",
+          "enabled": true,
+          "label": "y_err",
+          "color": "#fb8c00"
+        },
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/rov_pid_controller/status.pose_error[2]",
+          "enabled": true,
+          "label": "z_err",
+          "color": "#1e88e5"
+        },
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/rov_pid_controller/status.velocity_error[0]",
+          "enabled": false,
+          "label": "x_vel_err",
+          "color": "#e5393580"
+        },
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/rov_pid_controller/status.velocity_error[1]",
+          "enabled": false,
+          "label": "y_vel_err",
+          "color": "#fb8c0080"
+        },
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/rov_pid_controller/status.velocity_error[2]",
+          "enabled": false,
+          "label": "z_vel_err",
+          "color": "#1e88e580"
+        }
+      ],
+      "showLegend": true,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "timeWindowMode": "sliding",
+      "foxglovePanelTitle": "Linear Error"
+    },
+    "Plot!3ldwsrr": {
+      "title": "Tracking Error (6 DoF)",
+      "paths": [
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/rov_pid_controller/status.pose_error[3]",
+          "enabled": true,
+          "label": "roll_err",
+          "color": "#8e24aa"
+        },
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/rov_pid_controller/status.pose_error[4]",
+          "enabled": true,
+          "label": "pitch_err",
+          "color": "#00897b"
+        },
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/rov_pid_controller/status.pose_error[5]",
+          "enabled": true,
+          "label": "yaw_err",
+          "color": "#43a047"
+        }
+      ],
+      "showLegend": true,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "timeWindowMode": "sliding",
+      "foxglovePanelTitle": "Angular Error"
+    },
+    "RawMessages!31fcw6u": {
+      "topicPath": "/rov_pid_controller/status"
+    },
+    "Plot!effort": {
+      "paths": [
+        {
+          "value": "/rov_pid_controller/status.effort[0]",
+          "enabled": true,
+          "label": "surge Output"
+        },
+        {
+          "value": "/rov_pid_controller/status.effort[1]",
+          "enabled": true,
+          "label": "sway Output"
+        },
+        {
+          "value": "/rov_pid_controller/status.effort[2]",
+          "enabled": true,
+          "label": "heave Output"
+        },
+        {
+          "value": "/rov_pid_controller/status.effort[3]",
+          "enabled": true,
+          "label": "roll Output"
+        },
+        {
+          "value": "/rov_pid_controller/status.effort[4]",
+          "enabled": true,
+          "label": "pitch Output"
+        },
+        {
+          "value": "/rov_pid_controller/status.effort[5]",
+          "enabled": true,
+          "label": "yaw Output"
+        }
+      ],
+      "showLegend": true,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "foxglovePanelTitle": "Output"
+    },
+    "Plot!1sy1uxz": {
+      "paths": [
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/rov_pid_controller/status.effort[3]",
+          "enabled": true,
+          "label": "roll Output"
+        },
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/rov_pid_controller/status.effort[4]",
+          "enabled": true,
+          "label": "pitch Output"
+        },
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/rov_pid_controller/status.effort[5]",
+          "enabled": true,
+          "label": "yaw Output"
+        }
+      ],
+      "showLegend": true,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "foxglovePanelTitle": "Output"
+    }
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "playbackConfig": {
+    "speed": 1
+  },
+  "layout": {
+    "first": {
+      "first": {
+        "first": {
+          "first": "CallService!30ib722",
+          "second": "CallService!all_off",
+          "direction": "row",
+          "splitPercentage": 51.45482388973968
+        },
+        "second": {
+          "first": "CallService!all_hold",
+          "second": {
+            "first": "CallService!depth_yaw",
+            "second": {
+              "first": "CallService!attitude",
+              "second": "CallService!all_inner",
+              "direction": "row",
+              "splitPercentage": 45.85121602288983
+            },
+            "direction": "row",
+            "splitPercentage": 32.09812108559497
+          },
+          "direction": "row",
+          "splitPercentage": 24.566929133858277
+        },
+        "direction": "row",
+        "splitPercentage": 32.733050847457626
+      },
+      "second": {
+        "first": "3D!trajectory",
+        "second": {
+          "first": {
+            "first": "Plot!pose",
+            "second": "Plot!3ijy38v",
+            "direction": "row"
+          },
+          "second": {
+            "first": "Plot!error",
+            "second": "Plot!3ldwsrr",
+            "direction": "row"
+          },
+          "direction": "column",
+          "splitPercentage": 50
+        },
+        "direction": "row",
+        "splitPercentage": 44.797653311754594
+      },
+      "direction": "column",
+      "splitPercentage": 25.21793275217933
+    },
+    "second": {
+      "first": "RawMessages!31fcw6u",
+      "second": {
+        "first": "Plot!effort",
+        "second": "Plot!1sy1uxz",
+        "direction": "row"
+      },
+      "direction": "row",
+      "splitPercentage": 44.88260084286574
+    },
+    "direction": "column",
+    "splitPercentage": 80.2423258283109
+  }
+}

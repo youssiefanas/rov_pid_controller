@@ -1,0 +1,10 @@
+# Capture the current pose as the hold setpoint for one or more axes.
+# Does NOT change any axis's mode — only updates its setpoint.
+
+# Axis indices to capture. Empty array = all six axes.
+uint8[] axes
+---
+bool success
+string message
+# Captured pose, ordered [surge, sway, heave, roll, pitch, yaw].
+float64[6] captured_setpoints

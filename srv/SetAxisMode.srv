@@ -1,0 +1,26 @@
+# Set the control mode for one axis, optionally capturing a pose setpoint.
+
+# Axis indices (body frame, x-forward y-right z-down convention as in odometry).
+uint8 AXIS_SURGE = 0
+uint8 AXIS_SWAY  = 1
+uint8 AXIS_HEAVE = 2
+uint8 AXIS_ROLL  = 3
+uint8 AXIS_PITCH = 4
+uint8 AXIS_YAW   = 5
+
+# Modes.
+uint8 MODE_OFF        = 0
+uint8 MODE_INNER_ONLY = 1
+uint8 MODE_FULL       = 2
+
+uint8 axis
+uint8 mode
+
+# Only used when mode == MODE_FULL.
+# If capture_current is true, the current measured pose for this axis is used
+# as the setpoint and the `setpoint` field is ignored.
+float64 setpoint
+bool capture_current
+---
+bool success
+string message

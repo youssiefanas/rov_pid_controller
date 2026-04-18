@@ -1,0 +1,16 @@
+# Set all six axis modes in one call (used by the control panel for presets).
+# Order: [surge, sway, heave, roll, pitch, yaw].
+
+uint8 MODE_OFF        = 0
+uint8 MODE_INNER_ONLY = 1
+uint8 MODE_FULL       = 2
+
+uint8[6] modes
+# Used only for axes where capture_current[i] is false AND modes[i] == MODE_FULL.
+float64[6] setpoints
+# If capture_current[i] is true, the current measured pose is used as the
+# setpoint for that axis (setpoints[i] ignored).
+bool[6] capture_current
+---
+bool success
+string message

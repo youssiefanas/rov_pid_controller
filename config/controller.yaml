@@ -1,0 +1,49 @@
+/**:
+  ros__parameters:
+    control_rate: 50.0
+    odometry_topic: /mimosa_node/imu/manager/odometry
+    publish_wrench: true
+    publish_cmd_vel: false
+
+    # PID gains — all zero except placeholders. Tune per axis.
+    # outer (pose -> velocity setpoint) and inner (velocity -> force/torque).
+    gains:
+      surge:
+        outer: {kp: 1.0, ki: 0.0, kd: 0.0, i_max: 0.0}
+        inner: {kp: 30.0, ki: 2.0, kd: 0.0, i_max: 20.0}
+      sway:
+        outer: {kp: 1.0, ki: 0.0, kd: 0.0, i_max: 0.0}
+        inner: {kp: 30.0, ki: 2.0, kd: 0.0, i_max: 20.0}
+      heave:
+        outer: {kp: 1.5, ki: 0.0, kd: 0.0, i_max: 0.0}
+        inner: {kp: 40.0, ki: 3.0, kd: 0.0, i_max: 25.0}
+      roll:
+        outer: {kp: 2.0, ki: 0.0, kd: 0.0, i_max: 0.0}
+        inner: {kp: 3.0, ki: 0.2, kd: 0.0, i_max: 2.0}
+      pitch:
+        outer: {kp: 2.0, ki: 0.0, kd: 0.0, i_max: 0.0}
+        inner: {kp: 3.0, ki: 0.2, kd: 0.0, i_max: 2.0}
+      yaw:
+        outer: {kp: 2.0, ki: 0.0, kd: 0.0, i_max: 0.0}
+        inner: {kp: 3.0, ki: 0.2, kd: 0.0, i_max: 2.0}
+
+    # max_velocity [m/s or rad/s] — also used to normalize joystick passthrough in OFF mode.
+    # max_effort   [N or Nm] — hard saturation on inner-loop output.
+    # max_effort_norm — full-scale effort that maps to ±1 in the Twist output
+    #                   (used only when publish_cmd_vel is true).
+    limits:
+      surge: {max_velocity: 0.5, max_effort: 80.0,  max_effort_norm: 80.0}
+      sway:  {max_velocity: 0.5, max_effort: 60.0,  max_effort_norm: 60.0}
+      heave: {max_velocity: 0.3, max_effort: 100.0, max_effort_norm: 100.0}
+      roll:  {max_velocity: 0.5, max_effort: 5.0,   max_effort_norm: 5.0}
+      pitch: {max_velocity: 0.5, max_effort: 5.0,   max_effort_norm: 5.0}
+      yaw:   {max_velocity: 1.0, max_effort: 5.0,   max_effort_norm: 5.0}
+
+    # Startup mode per axis: 0=OFF, 1=INNER_ONLY, 2=FULL.
+    mode:
+      surge: {default: 0}
+      sway:  {default: 0}
+      heave: {default: 0}
+      roll:  {default: 0}
+      pitch: {default: 0}
+      yaw:   {default: 0}
