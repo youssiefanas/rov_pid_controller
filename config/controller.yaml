@@ -33,11 +33,11 @@
     #                   (used only when publish_cmd_vel is true).
     limits:
       surge: {max_velocity: 0.5, max_effort: 80.0,  max_effort_norm: 80.0}
-      sway:  {max_velocity: 0.5, max_effort: 60.0,  max_effort_norm: 60.0}
-      heave: {max_velocity: 0.3, max_effort: 100.0, max_effort_norm: 100.0}
+      sway:  {max_velocity: 0.5, max_effort: 80.0,  max_effort_norm: 80.0}
+      heave: {max_velocity: 0.3, max_effort: 80.0,  max_effort_norm: 80.0}
       roll:  {max_velocity: 0.5, max_effort: 5.0,   max_effort_norm: 5.0}
       pitch: {max_velocity: 0.5, max_effort: 5.0,   max_effort_norm: 5.0}
-      yaw:   {max_velocity: 1.0, max_effort: 5.0,   max_effort_norm: 5.0}
+      yaw:   {max_velocity: 0.5, max_effort: 5.0,   max_effort_norm: 5.0}
 
     # Startup mode per axis: 0=OFF, 1=INNER_ONLY, 2=FULL.
     mode:
