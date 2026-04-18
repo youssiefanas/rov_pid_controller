@@ -63,6 +63,25 @@ All under `/rov_pid_controller/`:
 - `capture_setpoint` (`CaptureSetpoint`) — latch the current pose as the
   setpoint for one or more axes without changing modes.
 
+### Setpoint handling
+
+Pose setpoints are only used by the outer loop, which runs only in
+`MODE_FULL`. The three ways to set one:
+
+1. **Capture + hold atomically** — `set_axis_mode` (or `set_all_modes`) with
+   `mode=FULL` and `capture_current=true`. The current measured pose is
+   latched and the axis starts tracking it immediately. This is what the
+   Qt Capture button and the Foxglove "All HOLD" preset do.
+2. **Set an explicit value** — same call, `capture_current=false`, provide
+   a finite number in `setpoint`.
+3. **Pre-arm with capture, activate later** — call `capture_setpoint` now to
+   latch the current pose (axis mode unchanged); later flip to FULL with
+   `set_axis_mode` using `setpoint=NaN` and `capture_current=false`, which
+   keeps the stored setpoint.
+
+`NaN` in `setpoint`/`setpoints[i]` is the "keep what's stored" sentinel;
+any finite value overwrites it.
+
 ## Parameters
 
 See `config/controller.yaml` for a commented template. Groups:

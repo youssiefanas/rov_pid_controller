@@ -7,6 +7,8 @@ uint8 MODE_FULL       = 2
 
 uint8[6] modes
 # Used only for axes where capture_current[i] is false AND modes[i] == MODE_FULL.
+# Pass NaN to keep the axis's currently stored setpoint (e.g. one previously
+# latched by capture_setpoint); a finite value overwrites it.
 float64[6] setpoints
 # If capture_current[i] is true, the current measured pose is used as the
 # setpoint for that axis (setpoints[i] ignored).

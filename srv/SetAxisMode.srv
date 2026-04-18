@@ -19,6 +19,8 @@ uint8 mode
 # Only used when mode == MODE_FULL.
 # If capture_current is true, the current measured pose for this axis is used
 # as the setpoint and the `setpoint` field is ignored.
+# Otherwise, a finite `setpoint` value overwrites the stored setpoint; pass
+# NaN to keep whatever was last latched (e.g. by the capture_setpoint service).
 float64 setpoint
 bool capture_current
 ---

@@ -363,7 +363,9 @@ void ControllerNode::handle_set_axis_mode(
         return;
       }
       axes_[request->axis].set_pose_setpoint(pose_[request->axis]);
-    } else {
+    } else if (!std::isnan(request->setpoint)) {
+      // NaN means "keep the stored setpoint" (e.g. one previously latched
+      // by capture_setpoint). Any real number overwrites it.
       axes_[request->axis].set_pose_setpoint(request->setpoint);
     }
   }
@@ -406,8 +408,12 @@ void ControllerNode::handle_set_all_modes(
     const auto mode = static_cast<AxisMode>(request->modes[i]);
     axes_[i].set_mode(mode);
     if (mode == AxisMode::FULL) {
-      axes_[i].set_pose_setpoint(
-          request->capture_current[i] ? pose_[i] : request->setpoints[i]);
+      if (request->capture_current[i]) {
+        axes_[i].set_pose_setpoint(pose_[i]);
+      } else if (!std::isnan(request->setpoints[i])) {
+        // NaN per-axis means "keep the stored setpoint".
+        axes_[i].set_pose_setpoint(request->setpoints[i]);
+      }
     }
   }
 
