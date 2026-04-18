@@ -34,7 +34,7 @@
     limits:
       surge: {max_velocity: 0.5, max_effort: 80.0,  max_effort_norm: 80.0}
       sway:  {max_velocity: 0.5, max_effort: 80.0,  max_effort_norm: 80.0}
-      heave: {max_velocity: 0.3, max_effort: 80.0,  max_effort_norm: 80.0}
+      heave: {max_velocity: 0.5, max_effort: 80.0,  max_effort_norm: 80.0}
       roll:  {max_velocity: 0.5, max_effort: 5.0,   max_effort_norm: 5.0}
       pitch: {max_velocity: 0.5, max_effort: 5.0,   max_effort_norm: 5.0}
       yaw:   {max_velocity: 0.5, max_effort: 5.0,   max_effort_norm: 5.0}
