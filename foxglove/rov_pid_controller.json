@@ -40,9 +40,17 @@
     },
     "CallService!all_inner": {
       "serviceName": "/rov_pid_controller/set_all_modes",
-      "requestPayload": "{\n  \"modes\": [1, 1, 1, 1, 1, 1],\n  \"setpoints\": [0, 0, 0, 0, 0, 0],\n  \"capture_current\": [false, false, false, false, false, false]\n}",
-      "buttonText": "Velocity cmd (INNER)",
+      "requestPayload": "{\n  \"modes\": [1, 1, 1, 0, 0, 0],\n  \"setpoints\": [0, 0, 0, 0, 0, 0],\n  \"capture_current\": [false, false, false, false, false, false]\n}",
+      "buttonText": "Velocity cmd (linear INNER)",
       "buttonColor": "#7b1fa2",
+      "layout": "vertical",
+      "timeoutSeconds": 10
+    },
+    "CallService!clear_safety": {
+      "serviceName": "/rov_pid_controller/clear_safety",
+      "requestPayload": "{}",
+      "buttonText": "Clear safety",
+      "buttonColor": "#d32f2f",
       "layout": "vertical",
       "timeoutSeconds": 10
     },
@@ -398,7 +406,12 @@
             "first": "CallService!depth_yaw",
             "second": {
               "first": "CallService!attitude",
-              "second": "CallService!all_inner",
+              "second": {
+                "first": "CallService!all_inner",
+                "second": "CallService!clear_safety",
+                "direction": "row",
+                "splitPercentage": 55
+              },
               "direction": "row",
               "splitPercentage": 45.85121602288983
             },

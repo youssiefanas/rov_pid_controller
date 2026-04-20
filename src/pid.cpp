@@ -1,6 +1,7 @@
 #include "rov_pid_controller/pid.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace rov_pid_controller {
 
@@ -19,14 +20,22 @@ void Pid::reset() {
 double Pid::update(double setpoint, double measurement, double dt) {
   if (dt <= 0.0) return prev_output_;
 
-  const double error = setpoint - measurement;
+  double error = setpoint - measurement;
+  if (cfg_.angular) {
+    // std::remainder gives a symmetric [-180, 180] result regardless of sign,
+    // unlike std::fmod which keeps the dividend's sign and breaks for error < -180.
+    error = std::remainder(error, 360.0);
+  }
   const double p = cfg_.kp * error;
 
+  // Angular axes have no velocity feedback available (mimosa odom), so the
+  // derivative term is skipped there. For linear axes, prefer
+  // derivative-on-measurement to avoid the "derivative kick" on setpoint steps.
   double d = 0.0;
-  if (!first_) {
+  if (!cfg_.angular && !first_) {
     d = cfg_.derivative_on_measurement
-          ? -cfg_.kd * (measurement - prev_measurement_) / dt
-          :  cfg_.kd * (error - prev_error_) / dt;
+            ? -cfg_.kd * (measurement - prev_measurement_) / dt
+            :  cfg_.kd * (error - prev_error_) / dt;
   }
 
   // Tentative output using current (not-yet-updated) integrator state.

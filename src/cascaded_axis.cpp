@@ -4,21 +4,22 @@
 
 namespace rov_pid_controller {
 
-namespace {
-double wrap_pi(double a) {
-  while (a >  M_PI) a -= 2.0 * M_PI;
-  while (a < -M_PI) a += 2.0 * M_PI;
-  return a;
-}
-}  // namespace
-
 CascadedAxis::CascadedAxis(const CascadedAxisConfig & cfg) { set_config(cfg); }
 
 void CascadedAxis::set_config(const CascadedAxisConfig & cfg) {
   cfg_ = cfg;
 
   Pid::Config outer_cfg = cfg.outer;
-  if (cfg.max_velocity > 0.0) {
+  outer_cfg.angular = cfg.angular;
+  if (cfg.angular) {
+    // Angular axes run single-loop: outer PID produces torque directly (mimosa
+    // odometry has no angular velocity, so a cascaded inner velocity loop
+    // would have no feedback). Clamp the outer output to max_effort.
+    if (cfg.max_effort > 0.0) {
+      outer_cfg.out_min = -cfg.max_effort;
+      outer_cfg.out_max =  cfg.max_effort;
+    }
+  } else if (cfg.max_velocity > 0.0) {
     outer_cfg.out_min = -cfg.max_velocity;
     outer_cfg.out_max =  cfg.max_velocity;
   }
@@ -49,19 +50,21 @@ double CascadedAxis::update(double measured_pose, double measured_vel,
                             double velocity_sp, double dt) {
   if (mode_ == AxisMode::OFF) return 0.0;
 
-  double vel_sp = velocity_sp;
-  if (mode_ == AxisMode::FULL) {
-    // For angular axes, feed the wrapped error directly so the PID sees a
-    // continuous signal around ±π.
-    double sp_input = pose_sp_;
-    double meas_input = measured_pose;
-    if (cfg_.angular) {
-      sp_input = 0.0;
-      meas_input = -wrap_pi(pose_sp_ - measured_pose);
+  if (cfg_.angular) {
+    // Single-loop: outer PID maps pose error directly to torque.
+    // The PID class handles angular error wrapping and D-term wrapping internally,
+    // so we can safely pass raw [-180, 180] degree measurements here.
+    // INNER_ONLY has no inner loop for angular axes and falls through to a no-op.
+    if (mode_ == AxisMode::FULL) {
+      return outer_.update(pose_sp_, measured_pose, dt);
     }
-    vel_sp = outer_.update(sp_input, meas_input, dt);
+    return 0.0;
   }
 
+  double vel_sp = velocity_sp;
+  if (mode_ == AxisMode::FULL) {
+    vel_sp = outer_.update(pose_sp_, measured_pose, dt);
+  }
   return inner_.update(vel_sp, measured_vel, dt);
 }
 

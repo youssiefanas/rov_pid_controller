@@ -83,4 +83,16 @@ install(PROGRAMS scripts/axis_panel.py
 )
 
 ament_export_include_directories(include)
+
+# --- Tests ---
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+
+  ament_add_gtest(test_pid test/test_pid.cpp)
+  target_link_libraries(test_pid rov_pid_core)
+
+  ament_add_gtest(test_cascaded_axis test/test_cascaded_axis.cpp)
+  target_link_libraries(test_cascaded_axis rov_pid_core)
+endif()
+
 ament_package()

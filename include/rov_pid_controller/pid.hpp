@@ -15,6 +15,7 @@ public:
     double out_max =  std::numeric_limits<double>::infinity();
     double rate_limit = 0.0;  // max |du/dt|; <=0 disables
     bool derivative_on_measurement = true;
+    bool angular = false;        // if true, wrap error to [-180, 180] (degrees)
   };
 
   Pid() = default;

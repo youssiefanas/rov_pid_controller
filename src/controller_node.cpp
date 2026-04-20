@@ -11,14 +11,17 @@
 #include <tf2/LinearMath/Quaternion.h>
 
 namespace {
+// step=0 means "continuous" — no modulo check, which would reject YAML-loaded
+// values like 0.2 or 0.3 that aren't exact multiples of the slider step in
+// IEEE 754. rqt/Foxglove still render a slider from the range alone.
 rcl_interfaces::msg::ParameterDescriptor
-make_float_slider(double lo, double hi, double step, const std::string & desc) {
+make_float_slider(double lo, double hi, const std::string & desc) {
   rcl_interfaces::msg::ParameterDescriptor d;
   d.description = desc;
   rcl_interfaces::msg::FloatingPointRange r;
   r.from_value = lo;
   r.to_value = hi;
-  r.step = step;
+  r.step = 0.0;
   d.floating_point_range.push_back(r);
   return d;
 }
@@ -30,11 +33,6 @@ namespace {
 const char * AXIS_NAMES[6] = {"surge", "sway", "heave", "roll", "pitch", "yaw"};
 constexpr bool AXIS_ANGULAR[6] = {false, false, false, true, true, true};
 
-double wrap_pi(double a) {
-  while (a >  M_PI) a -= 2.0 * M_PI;
-  while (a < -M_PI) a += 2.0 * M_PI;
-  return a;
-}
 }  // namespace
 
 ControllerNode::ControllerNode(const rclcpp::NodeOptions & options)
@@ -45,6 +43,7 @@ ControllerNode::ControllerNode(const rclcpp::NodeOptions & options)
   const double rate = this->get_parameter("control_rate").as_double();
   publish_wrench_   = this->get_parameter("publish_wrench").as_bool();
   publish_cmd_vel_  = this->get_parameter("publish_cmd_vel").as_bool();
+  odom_timeout_     = this->get_parameter("odom_timeout").as_double();
 
   const auto qos = rclcpp::QoS(rclcpp::KeepLast(1))
                        .reliability(rclcpp::ReliabilityPolicy::BestEffort);
@@ -80,6 +79,11 @@ ControllerNode::ControllerNode(const rclcpp::NodeOptions & options)
       std::bind(&ControllerNode::handle_capture_setpoint, this,
                 std::placeholders::_1, std::placeholders::_2));
 
+  clear_safety_srv_ = this->create_service<std_srvs::srv::Trigger>(
+      "clear_safety",
+      std::bind(&ControllerNode::handle_clear_safety, this,
+                std::placeholders::_1, std::placeholders::_2));
+
   param_cb_handle_ = this->add_on_set_parameters_callback(
       std::bind(&ControllerNode::on_parameters_set, this, std::placeholders::_1));
 
@@ -95,10 +99,13 @@ ControllerNode::ControllerNode(const rclcpp::NodeOptions & options)
       std::bind(&ControllerNode::publish_status, this));
 
   last_tick_ = this->now();
+  last_odom_time_ = last_tick_;
+  last_ff_time_ = last_tick_;
+  safety_trip_time_ = last_tick_;
 
   RCLCPP_INFO(this->get_logger(),
-              "rov_pid_controller ready @ %.1f Hz  (wrench=%d twist=%d)",
-              rate, publish_wrench_, publish_cmd_vel_);
+              "rov_pid_controller ready @ %.1f Hz  (wrench=%d twist=%d odom_timeout=%.2fs)",
+              rate, publish_wrench_, publish_cmd_vel_, odom_timeout_);
 }
 
 // ---------------------------------------------------------------------------
@@ -109,32 +116,48 @@ void ControllerNode::declare_parameters() {
   this->declare_parameter("odometry_topic", "imu/manager/odometry");
   this->declare_parameter("publish_wrench", true);
   this->declare_parameter("publish_cmd_vel", false);
+  this->declare_parameter(
+      "odom_timeout", 0.5,
+      make_float_slider(0.0, 5.0,
+          "seconds without odom before the safety watchdog trips; "
+          "<=0 disables"));
 
-  // Slider ranges — chosen to cover typical BlueROV tuning regimes.
-  // Outer loop produces a velocity setpoint; inner loop produces force/torque,
-  // so inner gains are naturally an order of magnitude larger.
-  const auto outer_kp = make_float_slider(0.0, 20.0, 0.05, "outer (pose) Kp");
-  const auto outer_ki = make_float_slider(0.0, 10.0, 0.01, "outer (pose) Ki");
-  const auto outer_kd = make_float_slider(0.0, 10.0, 0.01, "outer (pose) Kd");
-  const auto outer_im = make_float_slider(0.0, 50.0, 0.1,  "outer integrator clamp (<=0 disables)");
-  const auto inner_kp = make_float_slider(0.0, 200.0, 0.5, "inner (velocity) Kp");
-  const auto inner_ki = make_float_slider(0.0, 100.0, 0.1, "inner (velocity) Ki");
-  const auto inner_kd = make_float_slider(0.0, 100.0, 0.1, "inner (velocity) Kd");
-  const auto inner_im = make_float_slider(0.0, 200.0, 0.5, "inner integrator clamp (<=0 disables)");
-  const auto max_vel  = make_float_slider(0.0, 5.0,  0.05, "outer loop velocity clamp");
-  const auto max_eff  = make_float_slider(0.0, 400.0, 1.0, "inner loop effort clamp (N or Nm)");
-  const auto max_effn = make_float_slider(0.0, 400.0, 1.0, "effort normalization for Twist output");
+  // Slider ranges — chosen to cover typical BlueROV tuning regimes. Linear axes
+  // use a cascade (pose → velocity → force); angular axes run single-loop
+  // (pose → torque) because mimosa's odometry has no angular velocity. So
+  // outer gains differ in units between axis groups and get wider ranges for
+  // angular so they can directly emit torque.
+  const auto outer_kp_lin = make_float_slider(-20.0, 20.0,  "outer (pose→vel) Kp");
+  const auto outer_ki_lin = make_float_slider(-10.0, 10.0,  "outer (pose→vel) Ki");
+  const auto outer_kd_lin = make_float_slider(-10.0, 10.0,  "outer (pose→vel) Kd");
+  const auto outer_im_lin = make_float_slider(0.0, 50.0,  "outer integrator clamp (<=0 disables)");
+  const auto outer_kp_ang = make_float_slider(-5.0, 5.0, "pose→torque Kp");
+  const auto outer_ki_ang = make_float_slider(-5.0, 5.0, "pose→torque Ki");
+  const auto outer_kd_ang = make_float_slider(-5.0, 5.0, "pose→torque Kd");
+  const auto outer_im_ang = make_float_slider(0.0, 200.0, "integrator clamp (<=0 disables)");
+  const auto inner_kp = make_float_slider(-100.0,   100.0, "inner (velocity) Kp");
+  const auto inner_ki = make_float_slider(-50.0, 50.0, "inner (velocity) Ki");
+  const auto inner_kd = make_float_slider(-50.0, 50.0, "inner (velocity) Kd");
+  const auto inner_im = make_float_slider(0.0, 200.0, "inner integrator clamp (<=0 disables)");
+  const auto max_vel  = make_float_slider(0.0, 5.0,   "velocity clamp / joystick full-scale");
+  const auto max_eff  = make_float_slider(0.0, 100.0, "effort clamp (N or Nm)");
+  const auto max_effn = make_float_slider(0.0, 100.0, "effort normalization for Twist output");
 
   for (size_t i = 0; i < N_AXES; ++i) {
     const std::string a = AXIS_NAMES[i];
-    this->declare_parameter("gains." + a + ".outer.kp",    1.0,  outer_kp);
-    this->declare_parameter("gains." + a + ".outer.ki",    0.0,  outer_ki);
-    this->declare_parameter("gains." + a + ".outer.kd",    0.0,  outer_kd);
-    this->declare_parameter("gains." + a + ".outer.i_max", 0.0,  outer_im);
-    this->declare_parameter("gains." + a + ".inner.kp",    10.0, inner_kp);
-    this->declare_parameter("gains." + a + ".inner.ki",    0.0,  inner_ki);
-    this->declare_parameter("gains." + a + ".inner.kd",    0.0,  inner_kd);
-    this->declare_parameter("gains." + a + ".inner.i_max", 0.0,  inner_im);
+    const bool ang = AXIS_ANGULAR[i];
+    this->declare_parameter("gains." + a + ".outer.kp",    ang ? 10.0 : 1.0, ang ? outer_kp_ang : outer_kp_lin);
+    this->declare_parameter("gains." + a + ".outer.ki",    0.0,              ang ? outer_ki_ang : outer_ki_lin);
+    this->declare_parameter("gains." + a + ".outer.kd",    0.0,              ang ? outer_kd_ang : outer_kd_lin);
+    this->declare_parameter("gains." + a + ".outer.i_max", 0.0,              ang ? outer_im_ang : outer_im_lin);
+    if (!ang) {
+      // Inner velocity loop is linear-only; angular axes produce torque from
+      // the outer pose PID directly.
+      this->declare_parameter("gains." + a + ".inner.kp",    10.0, inner_kp);
+      this->declare_parameter("gains." + a + ".inner.ki",    0.0,  inner_ki);
+      this->declare_parameter("gains." + a + ".inner.kd",    0.0,  inner_kd);
+      this->declare_parameter("gains." + a + ".inner.i_max", 0.0,  inner_im);
+    }
     this->declare_parameter("limits." + a + ".max_velocity",    0.5,  max_vel);
     this->declare_parameter("limits." + a + ".max_effort",      40.0, max_eff);
     this->declare_parameter("limits." + a + ".max_effort_norm", 40.0, max_effn);
@@ -145,21 +168,24 @@ void ControllerNode::declare_parameters() {
 CascadedAxisConfig ControllerNode::build_axis_config(size_t i) const {
   const std::string a = AXIS_NAMES[i];
   CascadedAxisConfig c;
+  c.angular     = AXIS_ANGULAR[i];
   c.outer.kp    = this->get_parameter("gains." + a + ".outer.kp").as_double();
   c.outer.ki    = this->get_parameter("gains." + a + ".outer.ki").as_double();
   c.outer.kd    = this->get_parameter("gains." + a + ".outer.kd").as_double();
   c.outer.i_max = this->get_parameter("gains." + a + ".outer.i_max").as_double();
-  c.inner.kp    = this->get_parameter("gains." + a + ".inner.kp").as_double();
-  c.inner.ki    = this->get_parameter("gains." + a + ".inner.ki").as_double();
-  c.inner.kd    = this->get_parameter("gains." + a + ".inner.kd").as_double();
-  c.inner.i_max = this->get_parameter("gains." + a + ".inner.i_max").as_double();
+  if (!c.angular) {
+    c.inner.kp    = this->get_parameter("gains." + a + ".inner.kp").as_double();
+    c.inner.ki    = this->get_parameter("gains." + a + ".inner.ki").as_double();
+    c.inner.kd    = this->get_parameter("gains." + a + ".inner.kd").as_double();
+    c.inner.i_max = this->get_parameter("gains." + a + ".inner.i_max").as_double();
+  }
   c.max_velocity = this->get_parameter("limits." + a + ".max_velocity").as_double();
   c.max_effort   = this->get_parameter("limits." + a + ".max_effort").as_double();
-  c.angular = AXIS_ANGULAR[i];
   return c;
 }
 
 void ControllerNode::reload_config() {
+  odom_timeout_ = this->get_parameter("odom_timeout").as_double();
   for (size_t i = 0; i < N_AXES; ++i) {
     const std::string a = AXIS_NAMES[i];
     const auto cfg = build_axis_config(i);
@@ -204,20 +230,22 @@ void ControllerNode::odom_callback(nav_msgs::msg::Odometry::ConstSharedPtr msg) 
 
   tf2::Quaternion q(msg->pose.pose.orientation.x, msg->pose.pose.orientation.y,
                     msg->pose.pose.orientation.z, msg->pose.pose.orientation.w);
-  double r, p, y;
-  tf2::Matrix3x3(q).getRPY(r, p, y);
-  pose_[ROLL]  = r;
-  pose_[PITCH] = p;
-  pose_[YAW]   = y;
+  double rpy[3];
+  // getRPY returns roll/yaw in [-pi, pi] and pitch in [-pi/2, pi/2], so no
+  // extra wrapping is needed before converting to degrees.
+  tf2::Matrix3x3(q).getRPY(rpy[0], rpy[1], rpy[2]);
+
+  constexpr double RAD2DEG = 180.0 / M_PI;
+  pose_[ROLL]  = rpy[0] * RAD2DEG;
+  pose_[PITCH] = rpy[1] * RAD2DEG;
+  pose_[YAW]   = rpy[2] * RAD2DEG;
 
   // nav_msgs/Odometry twist is specified in child_frame_id (body).
   vel_[SURGE] = msg->twist.twist.linear.x;
   vel_[SWAY]  = msg->twist.twist.linear.y;
   vel_[HEAVE] = msg->twist.twist.linear.z;
-  vel_[ROLL]  = msg->twist.twist.angular.x;
-  vel_[PITCH] = msg->twist.twist.angular.y;
-  vel_[YAW]   = msg->twist.twist.angular.z;
 
+  last_odom_time_ = this->now();
   have_odom_ = true;
 }
 
@@ -228,6 +256,7 @@ void ControllerNode::ff_callback(geometry_msgs::msg::Twist::ConstSharedPtr msg) 
   ff_vel_[ROLL]  = msg->angular.x;
   ff_vel_[PITCH] = msg->angular.y;
   ff_vel_[YAW]   = msg->angular.z;
+  last_ff_time_ = this->now();
 }
 
 // ---------------------------------------------------------------------------
@@ -245,23 +274,42 @@ void ControllerNode::control_tick() {
 
   if (!have_odom_ || dt <= 0.0) return;
 
+  // Safety watchdog: if the odometry stream has gone stale, force all axes to
+  // OFF, reset integrators, and hold output at zero until a fresh cmd_vel_in
+  // arrives — then OFF passthrough takes over. odom_timeout <= 0 disables.
+  if (odom_timeout_ > 0.0 && !safety_tripped_) {
+    const double odom_age = (now - last_odom_time_).seconds();
+    if (odom_age > odom_timeout_) {
+      trip_safety("odometry stale: " + std::to_string(odom_age) + "s > " +
+                  std::to_string(odom_timeout_) + "s timeout");
+    }
+  }
+
   std::array<double, N_AXES> effort{};
   std::array<double, N_AXES> twist_out{};
 
-  for (size_t i = 0; i < N_AXES; ++i) {
-    if (axes_[i].mode() == AxisMode::OFF) {
-      // Passthrough: cmd_vel_in is in physical units (m/s, rad/s). Normalize
-      // by max_velocity to get a Twist the downstream mixer expects, and scale
-      // to N/Nm for the wrench publisher so sim sees something equivalent.
-      const double maxv = std::max(1e-9, max_velocity_[i]);
-      const double norm = std::clamp(ff_vel_[i] / maxv, -1.0, 1.0);
-      twist_out[i] = norm;
-      effort[i]    = norm * max_effort_norm_[i];
-    } else {
-      effort[i] = axes_[i].update(pose_[i], vel_[i], ff_vel_[i], dt);
-      twist_out[i] = (max_effort_norm_[i] > 0.0)
-                         ? std::clamp(effort[i] / max_effort_norm_[i], -1.0, 1.0)
-                         : 0.0;
+  // While safety is tripped and no fresh joystick command has come in since
+  // the trip, publish zero. After the pilot touches the stick (or an external
+  // node publishes cmd_vel_in), fall through to normal OFF passthrough.
+  const bool hold_zero =
+      safety_tripped_ && (last_ff_time_ <= safety_trip_time_);
+
+  if (!hold_zero) {
+    for (size_t i = 0; i < N_AXES; ++i) {
+      if (axes_[i].mode() == AxisMode::OFF) {
+        // Passthrough: cmd_vel_in is in physical units (m/s, rad/s). Normalize
+        // by max_velocity to get a Twist the downstream mixer expects, and scale
+        // to N/Nm for the wrench publisher so sim sees something equivalent.
+        const double maxv = std::max(1e-9, max_velocity_[i]);
+        const double norm = std::clamp(ff_vel_[i] / maxv, -1.0, 1.0);
+        twist_out[i] = norm;
+        effort[i]    = norm * max_effort_norm_[i];
+      } else {
+        effort[i] = axes_[i].update(pose_[i], vel_[i], ff_vel_[i], dt);
+        twist_out[i] = (max_effort_norm_[i] > 0.0)
+                           ? std::clamp(effort[i] / max_effort_norm_[i], -1.0, 1.0)
+                           : 0.0;
+      }
     }
   }
 
@@ -299,38 +347,35 @@ void ControllerNode::publish_status() {
   msg::ControllerStatus s;
   s.header.stamp = this->now();
   s.header.frame_id = "base_link";
+  s.safety_tripped = safety_tripped_;
 
-  // Display-only conversion: angular axes (roll/pitch/yaw) are reported in
-  // degrees so the status / Foxglove plots are easier to read. The control
-  // loop internally still uses radians.
-  constexpr double RAD2DEG = 180.0 / M_PI;
-
+  // Angular axes are already stored in degrees; linear axes in SI units.
   for (size_t i = 0; i < N_AXES; ++i) {
     const auto mode = axes_[i].mode();
-    const double scale = AXIS_ANGULAR[i] ? RAD2DEG : 1.0;
 
     s.modes[i]     = static_cast<uint8_t>(mode);
-    s.setpoints[i] = axes_[i].pose_setpoint() * scale;
-    s.pose[i]      = pose_[i] * scale;
-    s.velocity[i]  = vel_[i] * scale;
-    s.effort[i]    = last_effort_[i];  // force/torque — unit unchanged
+    s.setpoints[i] = axes_[i].pose_setpoint();
+    s.pose[i]      = pose_[i];
+    s.velocity[i]  = vel_[i];
+    s.effort[i]    = last_effort_[i];
 
-    // Pose error is only meaningful in FULL mode — wrap angular axes to (-pi, pi]
-    // (in radians) before converting to degrees for display.
+    // Pose error — wrap angular axes to [-180, 180] degrees so this matches
+    // exactly what the PID sees in Pid::update (std::remainder).
     if (mode == AxisMode::FULL) {
       double e = axes_[i].pose_setpoint() - pose_[i];
-      if (AXIS_ANGULAR[i]) e = wrap_pi(e);
-      s.pose_error[i] = e * scale;
+      if (AXIS_ANGULAR[i]) {
+        e = std::remainder(e, 360.0);
+      }
+      s.pose_error[i] = e;
     } else {
       s.pose_error[i] = 0.0;
     }
 
-    // Velocity error tracks the active velocity command: ff_vel drives INNER_ONLY
-    // directly; in FULL it's the outer loop's output, which we don't surface —
-    // fall back to ff_vel for a useful "commanded minus measured" readout.
-    s.velocity_error[i] = (mode == AxisMode::OFF)
-                              ? 0.0
-                              : (ff_vel_[i] - vel_[i]) * scale;
+    if (mode == AxisMode::OFF || AXIS_ANGULAR[i]) {
+      s.velocity_error[i] = 0.0;
+    } else {
+      s.velocity_error[i] = ff_vel_[i] - vel_[i];
+    }
   }
   status_pub_->publish(s);
 }
@@ -351,6 +396,11 @@ void ControllerNode::handle_set_axis_mode(
     response->message = "mode must be 0=OFF, 1=INNER_ONLY, 2=FULL";
     return;
   }
+  if (safety_tripped_ && request->mode != 0) {
+    response->success = false;
+    response->message = "safety is tripped; call clear_safety first";
+    return;
+  }
 
   const auto new_mode = static_cast<AxisMode>(request->mode);
   axes_[request->axis].set_mode(new_mode);
@@ -364,8 +414,9 @@ void ControllerNode::handle_set_axis_mode(
       }
       axes_[request->axis].set_pose_setpoint(pose_[request->axis]);
     } else if (!std::isnan(request->setpoint)) {
-      // NaN means "keep the stored setpoint" (e.g. one previously latched
-      // by capture_setpoint). Any real number overwrites it.
+      // NaN means "keep the stored setpoint". Any real number overwrites it.
+      // Angular setpoints are in degrees; the PID's error wrapping handles
+      // the [-180, 180] discontinuity.
       axes_[request->axis].set_pose_setpoint(request->setpoint);
     }
   }
@@ -387,6 +438,15 @@ void ControllerNode::handle_set_all_modes(
       response->success = false;
       response->message = "mode out of range at axis " + std::to_string(i);
       return;
+    }
+  }
+  if (safety_tripped_) {
+    for (size_t i = 0; i < N_AXES; ++i) {
+      if (request->modes[i] != 0) {
+        response->success = false;
+        response->message = "safety is tripped; call clear_safety first";
+        return;
+      }
     }
   }
 
@@ -420,6 +480,48 @@ void ControllerNode::handle_set_all_modes(
   response->success = true;
   response->message = "ok";
   RCLCPP_INFO(this->get_logger(), "set_all_modes applied");
+}
+
+
+
+void ControllerNode::trip_safety(const std::string & reason) {
+  safety_tripped_ = true;
+  safety_trip_time_ = this->now();
+  for (size_t i = 0; i < N_AXES; ++i) {
+    axes_[i].set_mode(AxisMode::OFF);
+    axes_[i].reset();
+  }
+  last_effort_.fill(0.0);
+  RCLCPP_ERROR(this->get_logger(),
+               "SAFETY: %s — all axes forced OFF, output held at zero until "
+               "fresh cmd_vel_in. Call clear_safety to re-arm.",
+               reason.c_str());
+}
+
+void ControllerNode::handle_clear_safety(
+    const std::shared_ptr<std_srvs::srv::Trigger::Request> /*request*/,
+    std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
+  if (!safety_tripped_) {
+    response->success = true;
+    response->message = "safety not tripped; nothing to clear";
+    return;
+  }
+  const double odom_age = (this->now() - last_odom_time_).seconds();
+  if (odom_timeout_ > 0.0 && odom_age > odom_timeout_) {
+    response->success = false;
+    response->message = "odometry still stale (" + std::to_string(odom_age) +
+                        "s); refusing to clear";
+    RCLCPP_WARN(this->get_logger(), "clear_safety refused: %s",
+                response->message.c_str());
+    return;
+  }
+  safety_tripped_ = false;
+  for (size_t i = 0; i < N_AXES; ++i) {
+    axes_[i].reset();  // drop any integrator that's stuck from before the trip
+  }
+  response->success = true;
+  response->message = "safety cleared; axes remain OFF — re-engage modes manually";
+  RCLCPP_INFO(this->get_logger(), "safety cleared");
 }
 
 void ControllerNode::handle_capture_setpoint(

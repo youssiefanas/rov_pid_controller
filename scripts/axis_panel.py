@@ -30,6 +30,7 @@ from python_qt_binding.QtWidgets import (
 
 from rov_pid_controller.msg import ControllerStatus
 from rov_pid_controller.srv import SetAllModes, SetAxisMode
+from std_srvs.srv import Trigger
 
 AXIS_NAMES = ["surge", "sway", "heave", "roll", "pitch", "yaw"]
 # Angular axes are displayed in degrees in the panel (and in the status msg),
@@ -50,15 +51,18 @@ class PanelNode(Node):
         status_topic   = self._topic("status")
         set_axis_name  = self._topic("set_axis_mode")
         set_all_name   = self._topic("set_all_modes")
+        clear_name     = self._topic("clear_safety")
 
         self.get_logger().info(
             f"wiring to: status={status_topic} "
-            f"set_axis_mode={set_axis_name} set_all_modes={set_all_name}"
+            f"set_axis_mode={set_axis_name} set_all_modes={set_all_name} "
+            f"clear_safety={clear_name}"
         )
 
         self.create_subscription(ControllerStatus, status_topic, self._on_status, 10)
         self.set_axis_cli = self.create_client(SetAxisMode, set_axis_name)
         self.set_all_cli = self.create_client(SetAllModes, set_all_name)
+        self.clear_safety_cli = self.create_client(Trigger, clear_name)
         self._warned = set()
 
     def _topic(self, name: str) -> str:
@@ -103,6 +107,11 @@ class PanelNode(Node):
         req.capture_current = list(captures)
         self.set_all_cli.call_async(req)
 
+    def clear_safety(self):
+        if not self._check_ready(self.clear_safety_cli, "clear_safety"):
+            return
+        self.clear_safety_cli.call_async(Trigger.Request())
+
 
 class AxisRow:
     """Widgets and behavior for a single axis."""
@@ -123,6 +132,12 @@ class AxisRow:
         self.rb_inner = QRadioButton("INNER")
         self.rb_full  = QRadioButton("FULL")
         self.rb_off.setChecked(True)
+        # Angular axes run single-loop (pose -> torque); INNER has no meaning
+        # for them and would silently emit zero torque. Disable the radio so
+        # the UI matches what the controller accepts.
+        if self.is_angular:
+            self.rb_inner.setEnabled(False)
+            self.rb_inner.setToolTip("no inner-velocity loop on angular axes")
         for rb, m in ((self.rb_off, MODE_OFF), (self.rb_inner, MODE_INNER),
                       (self.rb_full, MODE_FULL)):
             self.mode_group.addButton(rb, m)
@@ -172,9 +187,8 @@ class AxisRow:
         return self.mode_group.checkedId()
 
     def _sp_to_service(self) -> float:
-        # Spinbox holds degrees for angular axes; services / PID expect radians.
-        v = self.sp_box.value()
-        return math.radians(v) if self.is_angular else v
+        # Controller now works in degrees for angular axes — send spinbox value directly.
+        return self.sp_box.value()
 
     def _on_mode_changed(self, mode: int):
         if self.suppress_signals:
@@ -221,6 +235,7 @@ class MainWindow(QWidget):
         self.setWindowTitle("ROV PID Controller — Axis Panel")
 
         root = QVBoxLayout(self)
+        root.addWidget(self._build_safety_bar())
         root.addWidget(self._build_presets())
         root.addWidget(self._hline())
         root.addWidget(self._build_axes())
@@ -229,6 +244,21 @@ class MainWindow(QWidget):
         self.refresh_timer = QTimer(self)
         self.refresh_timer.timeout.connect(self._refresh)
         self.refresh_timer.start(100)
+
+    def _build_safety_bar(self) -> QWidget:
+        box = QHBoxLayout()
+        self.safety_lbl = QLabel("Safety: OK")
+        self.safety_lbl.setStyleSheet("padding: 3px 8px; font-weight: bold;")
+        self.clear_btn = QPushButton("Clear safety")
+        self.clear_btn.setStyleSheet("background: #d32f2f; color: white;")
+        self.clear_btn.clicked.connect(self.node.clear_safety)
+        self.clear_btn.setEnabled(False)
+        box.addWidget(self.safety_lbl)
+        box.addWidget(self.clear_btn)
+        box.addStretch(1)
+        w = QWidget()
+        w.setLayout(box)
+        return w
 
     def _hline(self) -> QFrame:
         line = QFrame()
@@ -248,8 +278,9 @@ class MainWindow(QWidget):
             ("Attitude hold",
                 [MODE_OFF, MODE_OFF, MODE_OFF, MODE_FULL, MODE_FULL, MODE_FULL],
                 [False,    False,    False,    True,       True,       True]),
-            ("Velocity cmd (all INNER)",
-                [MODE_INNER] * 6, [False] * 6),
+            ("Velocity cmd (linear INNER)",
+                [MODE_INNER, MODE_INNER, MODE_INNER, MODE_OFF, MODE_OFF, MODE_OFF],
+                [False] * 6),
         ]
         for label, modes, captures in presets:
             btn = QPushButton(label)
@@ -279,6 +310,17 @@ class MainWindow(QWidget):
         status = self.node.get_status()
         if status is None:
             return
+        if bool(status.safety_tripped):
+            self.safety_lbl.setText("Safety: TRIPPED — odom stale")
+            self.safety_lbl.setStyleSheet(
+                "padding: 3px 8px; font-weight: bold; "
+                "background: #d32f2f; color: white;")
+            self.clear_btn.setEnabled(True)
+        else:
+            self.safety_lbl.setText("Safety: OK")
+            self.safety_lbl.setStyleSheet(
+                "padding: 3px 8px; font-weight: bold;")
+            self.clear_btn.setEnabled(False)
         for r in self.rows:
             r.refresh(status)
 

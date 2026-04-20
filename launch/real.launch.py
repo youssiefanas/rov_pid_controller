@@ -16,7 +16,9 @@ def generate_launch_description():
         Node(
             package='rov_pid_controller',
             executable='rov_pid_controller_node',
-            namespace='rov_pid_controller',
+            # Sits inside the /bluerov2 namespace so its cmd_vel output lines up
+            # with what bluerov2_controller/rov_controller subscribes to.
+            namespace='bluerov2/rov_pid_controller',
             name='rov_pid_controller',
             parameters=[params, {
                 'publish_wrench': False,
@@ -24,9 +26,11 @@ def generate_launch_description():
             }],
             remappings=[
                 # Joystick teleop (configured in m/s, rad/s) feeds the controller.
-                ('cmd_vel_in', '/cmd_vel_joy'),
-                # bluerov2_controller subscribes to the root-level /cmd_vel.
-                ('cmd_vel', '/cmd_vel'),
+                # Launch bluerov2_controller/gamepad_pid.launch.py so teleop
+                # publishes on /bluerov2/cmd_vel_joy instead of /bluerov2/cmd_vel.
+                ('cmd_vel_in', '/bluerov2/cmd_vel_joy'),
+                # bluerov2_controller/rov_controller subscribes to /bluerov2/cmd_vel.
+                ('cmd_vel', '/bluerov2/cmd_vel'),
             ],
             output='screen',
         ),

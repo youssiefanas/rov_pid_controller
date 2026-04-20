@@ -1,8 +1,7 @@
 # rov_pid_controller
 
-Cascaded 6-DoF PID controller for the BlueROV2 Heavy, targeted at ROS 2 Jazzy.
-Consumes a `nav_msgs/Odometry` state estimate, runs a per-axis *outer* pose
-loop that feeds an *inner* velocity loop, and publishes either a
+6-DoF PID controller for the BlueROV2 Heavy, targeted at ROS 2 Jazzy.
+Consumes a `nav_msgs/Odometry` state estimate and publishes either a
 `geometry_msgs/Wrench` (for simulation) or a normalized `geometry_msgs/Twist`
 (for `bluerov2_controller`/MAVROS on the real vehicle).
 
@@ -12,22 +11,32 @@ joystick for the rest" without any separate modes/code paths.
 
 ## Architecture
 
+Linear axes (**surge / sway / heave**) are cascaded: an outer pose loop feeds
+an inner velocity loop. Angular axes (**roll / pitch / yaw**) are single-loop
+(pose → torque directly) because mimosa's odometry does not publish angular
+velocity — a cascaded inner loop would have no feedback. Derivative-on-
+measurement in the single-loop gives `Kd` the role of angular-velocity damping
+without needing a gyro reading.
+
 ```
-           ┌─────────────────┐                       ┌──────────────┐
-odometry ─▶│ outer PID (pose)│── velocity setpoint ─▶│ inner PID    │── effort ─▶
-           └─────────────────┘                       │ (velocity)   │
-           setpoint & measured pose                  └──────────────┘
-                    ▲                                        ▲
-                    │                                        │
-              per-axis mode                          measured velocity
-                                                     + feed-forward velocity
+ Linear (cascade):
+   odom ─▶ outer PID ─ vel_sp ─▶ inner PID ─ force ─▶
+           (pose→vel)             (vel→N)
+
+ Angular (single-loop):
+   odom ─▶ outer PID ─ torque ─▶
+           (pose→Nm, D-term damps angular rate implicitly)
 ```
 
 - **OFF** – the PID is bypassed; `cmd_vel_in` is passed through (normalized by
   `max_velocity` for the Twist path, scaled by `max_effort_norm` for wrench).
-- **INNER_ONLY** – only the inner velocity loop runs, tracking `cmd_vel_in`.
-- **FULL** – outer pose loop produces the velocity setpoint, inner loop tracks
-  it. Angular axes wrap their error to (-π, π].
+- **INNER_ONLY** – linear axes track `cmd_vel_in` through the inner velocity
+  loop. Angular axes have no inner loop and output zero torque in this mode
+  (the Qt panel disables the radio button for angles so you can't pick it by
+  accident).
+- **FULL** – linear: outer pose loop produces the velocity setpoint, inner
+  loop tracks it. Angular: outer PID outputs torque directly. Angular axes
+  wrap their error to (-π, π] so the loop sees a continuous signal across ±π.
 
 Key implementation details (in `src/`):
 
@@ -62,6 +71,8 @@ All under `/rov_pid_controller/`:
   Foxglove preset buttons and the Qt panel).
 - `capture_setpoint` (`CaptureSetpoint`) — latch the current pose as the
   setpoint for one or more axes without changing modes.
+- `clear_safety` (`std_srvs/Trigger`) — re-arm after a watchdog trip. Refuses
+  if odometry is still stale. Axes stay OFF — re-engage modes manually.
 
 ### Setpoint handling
 
@@ -82,6 +93,30 @@ Pose setpoints are only used by the outer loop, which runs only in
 `NaN` in `setpoint`/`setpoints[i]` is the "keep what's stored" sentinel;
 any finite value overwrites it.
 
+## Safety watchdog
+
+If the odometry stream goes silent for longer than `odom_timeout` seconds
+(default 0.5, i.e. ~50 missed samples at mimosa's 100 Hz nominal rate), the
+controller trips a safety latch:
+
+1. All axes are forced to `OFF` and their integrators are reset.
+2. Wrench/cmd_vel output is **held at zero** until a fresh `cmd_vel_in`
+   message arrives — this prevents stale joystick values from being
+   re-emitted between the trip and the pilot touching the stick. Once new
+   input lands, normal OFF passthrough resumes so the pilot flies home.
+3. `ControllerStatus.safety_tripped` goes to `true`. The Qt panel and
+   Foxglove layout both surface this.
+4. `set_axis_mode` / `set_all_modes` reject any non-OFF request until the
+   latch is cleared — explicit re-arm is required.
+
+Call `clear_safety` (`std_srvs/Trigger`) to re-arm. Both UIs have a button
+for it. The call refuses while odom is still stale, so you can't accidentally
+re-arm into a broken state. After clearing, axes remain OFF; re-engage modes
+manually.
+
+Set `odom_timeout: 0.0` to disable the watchdog entirely (not recommended
+for vehicle work).
+
 ## Parameters
 
 See `config/controller.yaml` for a commented template. Groups:
@@ -89,11 +124,16 @@ See `config/controller.yaml` for a commented template. Groups:
 - `control_rate` — PID tick rate (Hz). Default 50.
 - `odometry_topic` — odometry source; default `/mimosa_node/imu/manager/odometry`.
 - `publish_wrench`, `publish_cmd_vel` — select output channel(s).
-- `gains.<axis>.outer.{kp,ki,kd,i_max}` — outer (pose) loop gains.
-- `gains.<axis>.inner.{kp,ki,kd,i_max}` — inner (velocity) loop gains.
-- `limits.<axis>.max_velocity` — outer-loop velocity clamp and joystick scale
-  for OFF passthrough.
-- `limits.<axis>.max_effort` — inner-loop force/torque clamp.
+- `gains.<axis>.outer.{kp,ki,kd,i_max}` — pose loop gains. For linear axes
+  these produce a velocity setpoint (units s⁻¹); for angular axes they produce
+  torque directly (units N·m / rad), so defaults differ.
+- `gains.<linear_axis>.inner.{kp,ki,kd,i_max}` — inner velocity loop gains.
+  Declared only for surge / sway / heave — angular axes have no inner loop.
+- `limits.<axis>.max_velocity` — linear: outer-loop velocity clamp. On all
+  axes, also the joystick full-scale for OFF passthrough (`cmd_vel_in /
+  max_velocity` → ±1 Twist).
+- `limits.<axis>.max_effort` — final-output clamp. On linear axes this limits
+  the inner loop; on angular axes it limits the outer loop's torque.
 - `limits.<axis>.max_effort_norm` — full-scale effort mapped to ±1 on the
   Twist output.
 - `mode.<axis>.default` — startup mode for this axis (0/1/2).
