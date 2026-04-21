@@ -109,6 +109,49 @@ TEST(CascadedAxisLinearTest, CascadeConvergesAtSetpoint) {
   EXPECT_DOUBLE_EQ(ax.update(3.0, 0.0, 0.0, DT), 0.0);
 }
 
+// ---- Linear pre-computed pose error ----------------------------------------
+
+TEST(CascadedAxisLinearTest, UpdateWithPoseErrorOffReturnsZero) {
+  CascadedAxis ax(linear_cfg());
+  ax.set_mode(AxisMode::OFF);
+  EXPECT_DOUBLE_EQ(ax.update_with_pose_error(5.0, 0.0, 0.0, DT), 0.0);
+}
+
+TEST(CascadedAxisLinearTest, UpdateWithPoseErrorMatchesUpdateWhenErrorEqual) {
+  // Feeding body-frame error e == world-frame error (no rotation) must yield
+  // the same inner-loop effort as the legacy update() path for identical
+  // configs and state. Derivative-on-measurement differs in interpretation but
+  // on the first tick no D-term is applied, so both paths should agree exactly.
+  auto cfg = linear_cfg();
+  CascadedAxis ax_legacy(cfg);
+  ax_legacy.set_mode(AxisMode::FULL);
+  ax_legacy.set_pose_setpoint(2.0);
+  const double u_legacy = ax_legacy.update(0.0, 0.0, 0.0, DT);
+
+  CascadedAxis ax_body(cfg);
+  ax_body.set_mode(AxisMode::FULL);
+  // No setpoint needed — the caller supplies the error directly.
+  const double u_body = ax_body.update_with_pose_error(2.0, 0.0, 0.0, DT);
+
+  EXPECT_DOUBLE_EQ(u_body, u_legacy);
+}
+
+TEST(CascadedAxisLinearTest, UpdateWithPoseErrorInnerOnlyUsesFfVelocity) {
+  // In INNER_ONLY the outer PID is bypassed, so the pose_error argument is
+  // ignored and effort comes from the external velocity setpoint.
+  CascadedAxis ax(linear_cfg());
+  ax.set_mode(AxisMode::INNER_ONLY);
+  EXPECT_DOUBLE_EQ(ax.update_with_pose_error(99.0, 0.0, 1.0, DT), 10.0);
+}
+
+TEST(CascadedAxisAngularTest, UpdateWithPoseErrorIsNoopForAngular) {
+  // Angular axes must not accept a pre-computed error path — the outer loop
+  // relies on the PID's internal angle wrapping.
+  CascadedAxis ax(angular_cfg());
+  ax.set_mode(AxisMode::FULL);
+  EXPECT_DOUBLE_EQ(ax.update_with_pose_error(5.0, 0.0, 0.0, DT), 0.0);
+}
+
 // ---- Angular single-loop ---------------------------------------------------
 
 TEST(CascadedAxisAngularTest, FullModeOutputsTorqueProportionalToError) {

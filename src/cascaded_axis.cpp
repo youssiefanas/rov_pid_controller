@@ -96,4 +96,27 @@ double CascadedAxis::update(double measured_pose, double measured_vel,
   return inner_.update(vel_sp, measured_vel, dt);
 }
 
+double CascadedAxis::update_with_pose_error(double pose_error,
+                                            double measured_vel,
+                                            double velocity_sp, double dt) {
+  if (mode_ == AxisMode::OFF || cfg_.angular) return 0.0;
+
+  // Advance the reference model so x_d progresses in lockstep with update()
+  // even when the caller provides a pre-computed error. The value itself is
+  // unused — the caller already baked it into pose_error.
+  if (cfg_.use_reference_model) {
+    ref_model_.update(dt);
+  }
+
+  double vel_sp = velocity_sp;
+  if (mode_ == AxisMode::FULL) {
+    // Pass setpoint=0, measurement=-pose_error so the PID computes
+    // error = 0 - (-pose_error) = pose_error. Derivative-on-measurement then
+    // yields -kd * d(-pose_error)/dt = kd * d(pose_error)/dt, matching the
+    // sign of d/dt of the body-frame error.
+    vel_sp = outer_.update(0.0, -pose_error, dt);
+  }
+  return inner_.update(vel_sp, measured_vel, dt);
+}
+
 }  // namespace rov_pid_controller

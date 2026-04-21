@@ -57,6 +57,14 @@ public:
   double update(double measured_pose, double measured_vel,
                 double velocity_sp, double dt);
 
+  // Variant that takes a pre-computed pose error (e.g. the linear position
+  // error already expressed in the body frame by the caller). Only valid for
+  // linear axes — the outer PID on angular axes wraps the error itself, so
+  // those must still use update(). Returns 0 for OFF; otherwise behaves like
+  // update() except the outer loop consumes `pose_error` directly.
+  double update_with_pose_error(double pose_error, double measured_vel,
+                                double velocity_sp, double dt);
+
 private:
   CascadedAxisConfig cfg_{};
   Pid outer_{};

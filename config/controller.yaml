@@ -19,14 +19,14 @@
     #   Kd acts as angular-velocity damping via derivative-on-measurement.
     gains:
       surge:
-        outer: {kp: 10.0, ki: 0.0, kd: 0.0, i_max: 0.0}
-        inner: {kp: 10.0, ki: 10.0, kd: 0.0, i_max: 20.0}
+        outer: {kp: 10.0, ki: 0.0, kd: 1.0, i_max: 0.0}
+        inner: {kp: 15.0, ki: 0.0, kd: 1.0, i_max: 20.0}
       sway:
-        outer: {kp: 10.0, ki: 0.0, kd: 0.0, i_max: 0.0}
-        inner: {kp: 10.0, ki: 0.0, kd: 0.0, i_max: 20.0}
+        outer: {kp: 10.0, ki: 0.0, kd: 0.5, i_max: 0.0}
+        inner: {kp: 10.0, ki: 0.0, kd: 0.5, i_max: 20.0}
       heave:
-        outer: {kp: 10.0, ki: 0.0, kd: 0.0, i_max: 0.0}
-        inner: {kp: 20.0, ki: 0.0, kd: 0.0, i_max: 25.0}
+        outer: {kp: 10.0, ki: 0.0, kd: 0.5, i_max: 0.0}
+        inner: {kp: 20.0, ki: 0.0, kd: 0.5, i_max: 25.0}
       roll:
         outer: {kp: 0.01, ki: 0.0, kd: 0.0, i_max: 1.0}
       pitch:

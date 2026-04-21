@@ -10,6 +10,7 @@
 #include <geometry_msgs/msg/wrench.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <std_srvs/srv/trigger.hpp>
+#include <tf2/LinearMath/Matrix3x3.h>
 
 #include "rov_pid_controller/cascaded_axis.hpp"
 #include "rov_pid_controller/msg/controller_status.hpp"
@@ -73,6 +74,12 @@ private:
   std::array<double, N_AXES> vel_{};                 // body-frame linear + angular
   std::array<double, N_AXES> ff_vel_{};              // cmd_vel_in (physical units)
   std::array<double, N_AXES> last_effort_{};         // last-published force/torque
+
+  // World->body rotation from the latest odometry. Used to express linear pose
+  // error in the body frame before the outer PID (so its velocity setpoint is
+  // comparable to the body-frame velocity measurement).
+  tf2::Matrix3x3 R_W_B_{tf2::Matrix3x3::getIdentity()};
+  std::array<double, 3> last_pose_error_B_{};        // body-frame SURGE/SWAY/HEAVE error (last tick)
 
   bool have_odom_ = false;
   bool params_dirty_ = false;

@@ -245,12 +245,17 @@ ControllerNode::on_parameters_set(const std::vector<rclcpp::Parameter> & /*param
 void ControllerNode::odom_callback(nav_msgs::msg::Odometry::ConstSharedPtr msg) {
   tf2::Quaternion q(msg->pose.pose.orientation.x, msg->pose.pose.orientation.y,
                     msg->pose.pose.orientation.z, msg->pose.pose.orientation.w);
+
+  R_W_B_.setRotation(q);
   double rpy[3];
   // getRPY returns roll/yaw in [-pi, pi] and pitch in [-pi/2, pi/2], so no
   // extra wrapping is needed before converting to degrees.
-  R_W_B.getRPY(rpy[0], rpy[1], rpy[2]);
+  R_W_B_.getRPY(rpy[0], rpy[1], rpy[2]);
 
   constexpr double RAD2DEG = 180.0 / M_PI;
+  pose_[SURGE] = msg->pose.pose.position.x;
+  pose_[SWAY]  = msg->pose.pose.position.y;
+  pose_[HEAVE] = msg->pose.pose.position.z;
   pose_[ROLL]  = rpy[0] * RAD2DEG;
   pose_[PITCH] = rpy[1] * RAD2DEG;
   pose_[YAW]   = rpy[2] * RAD2DEG;
@@ -310,6 +315,24 @@ void ControllerNode::control_tick() {
       safety_tripped_ && (last_ff_time_ <= safety_trip_time_);
 
   if (!hold_zero) {
+    // Linear pose error expressed in the body frame. Only axes in FULL
+    // contribute to the world-frame error vector — OFF/INNER_ONLY axes have a
+    // stale pose_sp_ that would otherwise leak a bogus "desired = 0" component
+    // through the rotation and corrupt the body-frame error on the FULL axes.
+    tf2::Vector3 e_W(0.0, 0.0, 0.0);
+    if (axes_[SURGE].mode() == AxisMode::FULL) {
+      e_W.setX(axes_[SURGE].desired_pose() - pose_[SURGE]);
+    }
+    if (axes_[SWAY].mode() == AxisMode::FULL) {
+      e_W.setY(axes_[SWAY].desired_pose() - pose_[SWAY]);
+    }
+    if (axes_[HEAVE].mode() == AxisMode::FULL) {
+      e_W.setZ(axes_[HEAVE].desired_pose() - pose_[HEAVE]);
+    }
+    const tf2::Vector3 e_B = R_W_B_.transpose() * e_W;
+    last_pose_error_B_ = {e_B.x(), e_B.y(), e_B.z()};
+    const std::array<double, 3> pose_err_B = last_pose_error_B_;
+
     for (size_t i = 0; i < N_AXES; ++i) {
       if (axes_[i].mode() == AxisMode::OFF) {
         // Passthrough: cmd_vel_in is in physical units (m/s, rad/s). Normalize
@@ -320,12 +343,19 @@ void ControllerNode::control_tick() {
         twist_out[i] = norm;
         effort[i]    = norm * max_effort_norm_[i];
       } else {
-        effort[i] = axes_[i].update(pose_[i], vel_[i], ff_vel_[i], dt);
+        if (AXIS_ANGULAR[i]) {
+          effort[i] = axes_[i].update(pose_[i], vel_[i], ff_vel_[i], dt);
+        } else {
+          effort[i] = axes_[i].update_with_pose_error(pose_err_B[i], vel_[i],
+                                                     ff_vel_[i], dt);
+        }
         twist_out[i] = (max_effort_norm_[i] > 0.0)
                            ? std::clamp(effort[i] / max_effort_norm_[i], -1.0, 1.0)
                            : 0.0;
       }
     }
+  } else {
+    last_pose_error_B_.fill(0.0);
   }
 
   if (publish_wrench_ && wrench_pub_) {
@@ -376,14 +406,13 @@ void ControllerNode::publish_status() {
     s.effort[i]       = last_effort_[i];
 
     // Pose error — wrap angular axes to [-180, 180] degrees so this matches
-    // exactly what the PID sees in Pid::update (std::remainder). Report the
-    // error against the smoothed desired_pose so the plot matches what the
-    // PID is actually tracking when the reference model is on.
+    // exactly what the PID sees in Pid::update (std::remainder). Linear axes
+    // report the body-frame error the outer PID actually consumes (see
+    // control_tick); angular axes stay in world-frame Euler.
     if (mode == AxisMode::FULL) {
-      double e = axes_[i].desired_pose() - pose_[i];
-      if (AXIS_ANGULAR[i]) {
-        e = std::remainder(e, 360.0);
-      }
+      double e = AXIS_ANGULAR[i]
+                     ? std::remainder(axes_[i].desired_pose() - pose_[i], 360.0)
+                     : last_pose_error_B_[i];
       s.pose_error[i] = e;
     } else {
       s.pose_error[i] = 0.0;
