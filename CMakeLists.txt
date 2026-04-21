@@ -30,12 +30,21 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 add_library(rov_pid_core
   src/pid.cpp
   src/cascaded_axis.cpp
+  src/reference_model.cpp
 )
 target_include_directories(rov_pid_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
 target_compile_features(rov_pid_core PUBLIC cxx_std_17)
+ament_target_dependencies(rov_pid_core
+  rclcpp geometry_msgs nav_msgs std_msgs std_srvs tf2 tf2_geometry_msgs
+)
+
+# Link generated interfaces into the library
+rosidl_get_typesupport_target(cpp_typesupport_target
+  ${PROJECT_NAME} "rosidl_typesupport_cpp")
+target_link_libraries(rov_pid_core "${cpp_typesupport_target}")
 
 # --- Controller node ---
 add_executable(rov_pid_controller_node
@@ -50,11 +59,6 @@ target_link_libraries(rov_pid_controller_node rov_pid_core)
 ament_target_dependencies(rov_pid_controller_node
   rclcpp geometry_msgs nav_msgs std_msgs std_srvs tf2 tf2_geometry_msgs
 )
-
-# Link generated interfaces into the node
-rosidl_get_typesupport_target(cpp_typesupport_target
-  ${PROJECT_NAME} "rosidl_typesupport_cpp")
-target_link_libraries(rov_pid_controller_node "${cpp_typesupport_target}")
 
 # --- Install ---
 install(TARGETS rov_pid_core
@@ -93,6 +97,9 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_cascaded_axis test/test_cascaded_axis.cpp)
   target_link_libraries(test_cascaded_axis rov_pid_core)
+
+  ament_add_gtest(test_reference_model test/test_reference_model.cpp)
+  target_link_libraries(test_reference_model rov_pid_core)
 endif()
 
 ament_package()

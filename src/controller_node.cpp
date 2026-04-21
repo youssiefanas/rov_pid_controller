@@ -122,6 +122,14 @@ void ControllerNode::declare_parameters() {
           "seconds without odom before the safety watchdog trips; "
           "<=0 disables"));
 
+  // Fossen (7.87–7.91) reference model — global enable, then per-axis shape.
+  // Disabled by default so existing tuning reproduces bit-for-bit until
+  // enabled explicitly.
+  this->declare_parameter("reference_model.enabled", false);
+  const auto ref_omega = make_float_slider(0.1, 5.0,  "reference-model natural frequency (rad/s)");
+  const auto ref_zeta  = make_float_slider(0.5, 2.0,  "reference-model damping (1.0 = critical)");
+  const auto ref_tau   = make_float_slider(0.01, 5.0, "first-order setpoint-filter time constant (s)");
+
   // Slider ranges — chosen to cover typical BlueROV tuning regimes. Linear axes
   // use a cascade (pose → velocity → force); angular axes run single-loop
   // (pose → torque) because mimosa's odometry has no angular velocity. So
@@ -162,6 +170,10 @@ void ControllerNode::declare_parameters() {
     this->declare_parameter("limits." + a + ".max_effort",      40.0, max_eff);
     this->declare_parameter("limits." + a + ".max_effort_norm", 40.0, max_effn);
     this->declare_parameter("mode." + a + ".default", 0);
+
+    this->declare_parameter("reference_model." + a + ".omega", 1.0, ref_omega);
+    this->declare_parameter("reference_model." + a + ".zeta",  1.0, ref_zeta);
+    this->declare_parameter("reference_model." + a + ".tau",   0.5, ref_tau);
   }
 }
 
@@ -181,6 +193,13 @@ CascadedAxisConfig ControllerNode::build_axis_config(size_t i) const {
   }
   c.max_velocity = this->get_parameter("limits." + a + ".max_velocity").as_double();
   c.max_effort   = this->get_parameter("limits." + a + ".max_effort").as_double();
+
+
+  c.use_reference_model = this->get_parameter("reference_model.enabled").as_bool();
+  c.ref.omega   = this->get_parameter("reference_model." + a + ".omega").as_double();
+  c.ref.zeta    = this->get_parameter("reference_model." + a + ".zeta").as_double();
+  c.ref.tau     = this->get_parameter("reference_model." + a + ".tau").as_double();
+  c.ref.angular = c.angular;
   return c;
 }
 
@@ -224,16 +243,12 @@ ControllerNode::on_parameters_set(const std::vector<rclcpp::Parameter> & /*param
 // Subscriptions
 // ---------------------------------------------------------------------------
 void ControllerNode::odom_callback(nav_msgs::msg::Odometry::ConstSharedPtr msg) {
-  pose_[SURGE] = msg->pose.pose.position.x;
-  pose_[SWAY]  = msg->pose.pose.position.y;
-  pose_[HEAVE] = msg->pose.pose.position.z;
-
   tf2::Quaternion q(msg->pose.pose.orientation.x, msg->pose.pose.orientation.y,
                     msg->pose.pose.orientation.z, msg->pose.pose.orientation.w);
   double rpy[3];
   // getRPY returns roll/yaw in [-pi, pi] and pitch in [-pi/2, pi/2], so no
   // extra wrapping is needed before converting to degrees.
-  tf2::Matrix3x3(q).getRPY(rpy[0], rpy[1], rpy[2]);
+  R_W_B.getRPY(rpy[0], rpy[1], rpy[2]);
 
   constexpr double RAD2DEG = 180.0 / M_PI;
   pose_[ROLL]  = rpy[0] * RAD2DEG;
@@ -353,16 +368,19 @@ void ControllerNode::publish_status() {
   for (size_t i = 0; i < N_AXES; ++i) {
     const auto mode = axes_[i].mode();
 
-    s.modes[i]     = static_cast<uint8_t>(mode);
-    s.setpoints[i] = axes_[i].pose_setpoint();
-    s.pose[i]      = pose_[i];
-    s.velocity[i]  = vel_[i];
-    s.effort[i]    = last_effort_[i];
+    s.modes[i]        = static_cast<uint8_t>(mode);
+    s.setpoints[i]    = axes_[i].pose_setpoint();
+    s.desired_pose[i] = axes_[i].desired_pose();
+    s.pose[i]         = pose_[i];
+    s.velocity[i]     = vel_[i];
+    s.effort[i]       = last_effort_[i];
 
     // Pose error — wrap angular axes to [-180, 180] degrees so this matches
-    // exactly what the PID sees in Pid::update (std::remainder).
+    // exactly what the PID sees in Pid::update (std::remainder). Report the
+    // error against the smoothed desired_pose so the plot matches what the
+    // PID is actually tracking when the reference model is on.
     if (mode == AxisMode::FULL) {
-      double e = axes_[i].pose_setpoint() - pose_[i];
+      double e = axes_[i].desired_pose() - pose_[i];
       if (AXIS_ANGULAR[i]) {
         e = std::remainder(e, 360.0);
       }
@@ -406,6 +424,11 @@ void ControllerNode::handle_set_axis_mode(
   axes_[request->axis].set_mode(new_mode);
 
   if (new_mode == AxisMode::FULL) {
+    // Arm the reference model from the current pose so enabling FULL never
+    // schedules a slew from stale x_d. Requires fresh odometry.
+    if (have_odom_) {
+      axes_[request->axis].arm(pose_[request->axis]);
+    }
     if (request->capture_current) {
       if (!have_odom_) {
         response->success = false;
@@ -468,6 +491,9 @@ void ControllerNode::handle_set_all_modes(
     const auto mode = static_cast<AxisMode>(request->modes[i]);
     axes_[i].set_mode(mode);
     if (mode == AxisMode::FULL) {
+      if (have_odom_) {
+        axes_[i].arm(pose_[i]);
+      }
       if (request->capture_current[i]) {
         axes_[i].set_pose_setpoint(pose_[i]);
       } else if (!std::isnan(request->setpoints[i])) {
@@ -539,6 +565,9 @@ void ControllerNode::handle_capture_setpoint(
 
   for (uint8_t i : targets) {
     if (i < N_AXES) {
+      // Snap the reference model to the fresh pose first so capturing a new
+      // setpoint never introduces a transient trajectory.
+      axes_[i].arm(pose_[i]);
       axes_[i].set_pose_setpoint(pose_[i]);
     }
   }

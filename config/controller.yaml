@@ -1,7 +1,7 @@
 /**:
   ros__parameters:
     control_rate: 50.0
-    odometry_topic: /mimosa_node/imu/manager/odometry
+    odometry_topic: /mimosa_node/graph/odometry
     publish_wrench: true
     publish_cmd_vel: false
 
@@ -56,3 +56,18 @@
       roll:  {default: 0}
       pitch: {default: 0}
       yaw:   {default: 0}
+
+    # Fossen (7.87–7.91) reference model. When enabled, each axis' raw pose
+    # setpoint is passed through a first-order filter (τ) feeding a
+    # second-order mass-spring-damper (ω natural frequency, ζ damping) before
+    # the outer PID sees it. ζ = 1.0 is critical damping (no overshoot); ω
+    # sets how fast the vehicle is commanded to slew. τ smooths sharp
+    # operator-issued setpoint steps.
+    reference_model:
+      enabled: true
+      surge: {omega: 1.0, zeta: 1.0, tau: 0.5}
+      sway:  {omega: 1.0, zeta: 1.0, tau: 0.5}
+      heave: {omega: 1.0, zeta: 1.0, tau: 0.5}
+      roll:  {omega: 1.0, zeta: 1.0, tau: 0.5}
+      pitch: {omega: 1.0, zeta: 1.0, tau: 0.5}
+      yaw:   {omega: 1.0, zeta: 1.0, tau: 0.5}

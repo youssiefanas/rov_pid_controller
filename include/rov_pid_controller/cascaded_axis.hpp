@@ -1,6 +1,7 @@
 #pragma once
 
 #include "rov_pid_controller/pid.hpp"
+#include "rov_pid_controller/reference_model.hpp"
 
 namespace rov_pid_controller {
 
@@ -16,6 +17,12 @@ struct CascadedAxisConfig {
   double max_velocity = 0.0;  // clamp on outer loop output; <=0 disables
   double max_effort   = 0.0;  // clamp on inner loop output; <=0 disables
   bool angular = false;       // if true, pose error wraps to [-pi, pi]
+
+  // Optional Fossen (7.87–7.91) reference model that smooths the pose
+  // setpoint before it reaches the outer PID. When use_reference_model is
+  // false, the raw pose_sp is fed straight through (legacy behavior).
+  ReferenceModel::Config ref{};
+  bool use_reference_model = false;
 };
 
 class CascadedAxis {
@@ -29,9 +36,18 @@ public:
   void set_mode(AxisMode mode);
   AxisMode mode() const { return mode_; }
 
-  void set_pose_setpoint(double sp) { pose_sp_ = sp; }
+  void set_pose_setpoint(double sp);
   double pose_setpoint() const { return pose_sp_; }
 
+    // Snap the reference model onto a measured pose (zero velocity/accel) so
+  // enabling FULL mode doesn't schedule a slew from stale state. Call this
+  // before transitioning OFF -> FULL when the reference model is active.
+  void arm(double measured_pose);
+ 
+  // Desired smoothed pose from the reference model; equals pose_sp_ when the
+  // reference model is disabled.
+  double desired_pose() const;
+ 
   void reset();
 
   // One PID step. Caller must ensure mode != OFF.
@@ -45,6 +61,7 @@ private:
   CascadedAxisConfig cfg_{};
   Pid outer_{};
   Pid inner_{};
+  ReferenceModel ref_model_{};
   AxisMode mode_ = AxisMode::OFF;
   double pose_sp_ = 0.0;
 };
